@@ -115,6 +115,7 @@ def _compact_account_for_list(row: dict) -> dict:
     for key in (
         "user_name", "email_source", "original_email", "note", "archived", "created_at",
         "plan_type", "current_plan_type", "plus_trial_eligible",
+        "eligible_promo_campaigns", "plus_trial_discount_percentage",
         "plan_check_status", "codex_status", "codex_agent_status",
         "totp_setup_status",
     ):
@@ -175,6 +176,13 @@ def _account_secret_value(row: dict, field: str) -> str:
     if field == "totp_code":
         secret = str(row.get("totp_secret") or "").strip()
         return pyotp.TOTP(secret).now() if secret else ""
+    if field == "login_credentials":
+        password = _account_secret_value(row, "password")
+        if password == "未设置":
+            password = ""
+        return "---".join((
+            str(row.get("email") or "").strip(), password, str(row.get("totp_secret") or "").strip(),
+        ))
     if field == "password":
         extra_raw = row.get("extra_json")
         extra = {}
@@ -186,7 +194,14 @@ def _account_secret_value(row: dict, field: str) -> str:
         elif isinstance(extra_raw, dict):
             extra = extra_raw
         return str(extra.get("registration_password") or row.get("registration_password") or "未设置")
-    raise ValueError("field 仅支持 access_token/copy_line/codex_agent_token/totp_secret/totp_code/password")
+    if field == "full_export":
+        try:
+            from core.db import _account_full_export_line
+
+            return str(_account_full_export_line(row) or "")
+        except Exception:
+            return ""
+    raise ValueError("field 仅支持 access_token/copy_line/codex_agent_token/totp_secret/totp_code/password/login_credentials/full_export")
 
 
 def _compact_job_for_list(row: dict) -> dict:
@@ -2953,6 +2968,8 @@ def create_app(auth_code: str | None = None) -> Flask:
         try:
             import config as _config_pkg
             _config_pkg.reload_all()
+            from core import twofa_service
+            twofa_service.apply_settings()
         except Exception as exc:
             reload_ok = False
             reload_err = f"{type(exc).__name__}: {exc}"
